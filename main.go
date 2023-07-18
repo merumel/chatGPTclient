@@ -19,7 +19,11 @@ func main() {
 		}
 		defer f.Close()
 	}
-	p := tea.NewProgram(initialModel())
+	p := tea.NewProgram(
+		initialModel(),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
 
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)

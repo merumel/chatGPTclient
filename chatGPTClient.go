@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 
@@ -40,8 +39,6 @@ func loadConfiguration(file string) Configuration {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("API Key: %s\n", config.API_KEY)
-
 	return config
 }
 
