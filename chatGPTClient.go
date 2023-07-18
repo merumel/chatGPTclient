@@ -9,9 +9,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	openai "github.com/sashabaranov/go-openai"
 )
-type chatGPTResponseMessage struct{
-	chatGptResponse string
-	err error
+type Role string
+
+const (
+	User      Role = "user"
+	Assistant Role = "assistant"
+	System    Role = "system"
+)
+type chatGPTMessage struct{
+	Content string
+	Role Role
+	Err error
 }
 type Configuration struct {
 	API_KEY string
@@ -42,30 +50,34 @@ func loadConfiguration(file string) Configuration {
 	return config
 }
 
-func getChatGPTResponse(chatMsg string, sub chan chatGPTResponseMessage) tea.Cmd{
+func getChatGPTResponse(messages []chatGPTMessage, sub chan chatGPTMessage) tea.Cmd{
 	return func() tea.Msg{
+		var openaiMessages []openai.ChatCompletionMessage
+		for _, msg := range messages {
+			openaiMessages = append(openaiMessages, openai.ChatCompletionMessage{
+				Role:    string(msg.Role),
+				Content: msg.Content,
+			})
+		}
 
 		resp, err := client.CreateChatCompletion(
 			context.Background(),
 			openai.ChatCompletionRequest{
 				Model: openai.GPT3Dot5Turbo,
-				Messages: []openai.ChatCompletionMessage{
-					{
-						Role:    openai.ChatMessageRoleUser,
-						Content: chatMsg,
-					},
-				},
+				Messages: openaiMessages,
 			},
 		)
 		if err != nil{
-			sub <- chatGPTResponseMessage{
-				chatGptResponse: "",
-				err: err,
+			sub <- chatGPTMessage{
+				Content: "",
+				Role: User,
+				Err: err,
 			}
 		} else{
-			sub <- chatGPTResponseMessage{
-				chatGptResponse: resp.Choices[0].Message.Content,
-				err: nil,
+			sub <- chatGPTMessage{
+				Content: resp.Choices[0].Message.Content,
+				Role: Role(resp.Choices[0].Message.Role),
+				Err: nil,
 			}
 		}		
 		return nil		

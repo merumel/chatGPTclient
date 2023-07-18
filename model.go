@@ -14,10 +14,9 @@ import (
 )
 type model struct {
 	viewport    viewport.Model
-	messages    []string
+	messages    []chatGPTMessage
 	textarea    textarea.Model
-	senderStyle lipgloss.Style
-	chatGPTChan chan chatGPTResponseMessage
+	chatGPTChan chan chatGPTMessage
 	spinner spinner.Model
 	isWaitingForResponse bool
 	textMaxWidth int
@@ -29,6 +28,8 @@ type model struct {
 type errMsg struct{ err error }
 var(
 	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render
+	senderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render
+	responseStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render
 )
 const useHighPerformanceRenderer = true
 
@@ -55,9 +56,9 @@ func initialModel() model {
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 	return model{
 		textarea:    ta,
-		messages:    []string{}, //needs to be new type to record senders to pass to api
-		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
-		chatGPTChan: make(chan chatGPTResponseMessage), //channel to receive chatgpt messages
+		messages:    []chatGPTMessage{}, //needs to be new type to record senders to pass to api
+		
+		chatGPTChan: make(chan chatGPTMessage), //channel to receive chatgpt messages
 		spinner: s,
 		isWaitingForResponse: false, //for spinning ticker
 		textMaxWidth: 120,
@@ -66,7 +67,22 @@ func initialModel() model {
 		err:         nil,
 	}
 }
-
+func formatChatMessages(messages []chatGPTMessage) string{
+	var formattedString string
+	for _, msg := range messages{
+		if(msg.Err != nil){
+			formattedString += senderStyle("Error: ") + msg.Err.Error()
+		}
+		if(msg.Role == User){
+			formattedString += senderStyle("You: ") + msg.Content
+		}
+		if(msg.Role == Assistant){
+			formattedString += responseStyle("ChatGPT: ") + msg.Content
+		}
+		formattedString += "\n"
+	}
+	return formattedString
+}
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		cmds []tea.Cmd
@@ -98,13 +114,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		case tea.KeyEnter:
 			userText := m.textarea.Value()
-			m.messages = append(m.messages, m.senderStyle.Render("You: ")+m.textarea.Value())
-			m.viewport.SetContent(strings.Join(m.messages, "\n"))			
+			//to do: create style processor before the array gets sent to view to display
+			//m.messages = append(m.messages, m.senderStyle.Render("You: ")+m.textarea.Value())
+			m.messages = append(m.messages, chatGPTMessage{Role: User, Content: userText})
+			m.viewport.SetContent(formatChatMessages(m.messages))			
 			m.textarea.Reset()
 			m.isWaitingForResponse = true
-			log.Println("message content: " + strings.Join(m.messages, "\n")) 
+			log.Println("message content: " + formatChatMessages(m.messages)) 
 			m.viewport.GotoBottom()
-			cmds = append(cmds, getChatGPTResponse(userText, m.chatGPTChan), m.spinner.Tick)		
+			cmds = append(cmds, getChatGPTResponse(m.messages, m.chatGPTChan), m.spinner.Tick)		
 		}
 	case tea.WindowSizeMsg:
 		textAreaHeight := m.textarea.Height()
@@ -145,18 +163,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		//m.viewport.YOffset = m.viewportOffset
 		m.viewport.SetContent(`Welcome to the chat room!
 	Type a message and press Enter to send.`)
-	case chatGPTResponseMessage:
-		gptMsg := chatGPTResponseMessage(msg)
-		if gptMsg.err != nil{
-			m.messages = append(m.messages, m.senderStyle.Render("ChatGPT Error: ")+gptMsg.err.Error())
-		} else {
-			m.messages = append(m.messages, m.senderStyle.Render("ChatGPT: ")+gptMsg.chatGptResponse)
-		}
+	case chatGPTMessage:
+		gptMsg := chatGPTMessage(msg)
+		m.messages = append(m.messages, gptMsg)
+
 		//log.Println("message content: " + strings.Join(m.messages, "\n")) 
 		m.isWaitingForResponse = false
 		m.viewportOffset = max(0, m.viewport.Height - len(m.messages))
     	m.viewport.YOffset = m.viewportOffset
-		m.viewport.SetContent(strings.Join(m.messages, "\n"))
+		m.viewport.SetContent(formatChatMessages(m.messages))
 		m.viewport.GotoBottom()
 		m.textarea.Reset()
 	case spinner.TickMsg:
@@ -177,12 +192,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...) //the '...' is expanind the cmd slice to pass to batch
 
 }
-func waitForActivity(sub chan chatGPTResponseMessage) tea.Cmd{
+func waitForActivity(sub chan chatGPTMessage) tea.Cmd{
 	return func() tea.Msg{
 		msg := <-sub
-		if len(msg.chatGptResponse) > 150 {
-			splittedMessages := splitIntoLines(msg.chatGptResponse, 120)
-			msg.chatGptResponse = strings.Join(splittedMessages, "\n")
+		if len(msg.Content) > 150 {
+			splittedMessages := splitIntoLines(msg.Content, 150)
+			msg.Content = strings.Join(splittedMessages, "\n")
 		}
 		return msg	
 	}
@@ -226,7 +241,7 @@ func (m model) View() string {
 		spinnerView,
 		m.textarea.View(),
 	) + "\n"+ helpStyle("Press Enter to send message. Ctrl + c to quit. ↑/↓ to scroll up and down") +
-	 "\n\n"
+	 "\n"
 }
 
 
